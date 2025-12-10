@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Petit Bac Multijoueur Synchro</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+
+    <style>
+        :root { --primary: #3f51b5; --danger: #f44336; --success: #4caf50; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; display: flex; flex-direction: column; align-items: center; padding: 10px; margin: 0; color: #333; }
+        h1 { margin-bottom: 10px; }
+        #app-container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 900px; }
+        
+        /* Ecran de Connexion */
+        #login-screen { text-align: center; padding: 30px; }
+        #login-screen input { padding: 10px; margin: 5px; font-size: 16px; border: 2px solid #ddd; border-radius: 5px; }
+        
+        /* Barres d'info */
+        .status-bar { display: flex; justify-content: space-between; background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; font-size: 1.1em; }
+        .letter-box { color: var(--danger); font-size: 1.4em; }
+        #timer-box { color: var(--primary); }
+        .game-status-msg { text-align: center; margin-bottom: 15px; font-style: italic; color: #666; }
+
+        /* Grille de jeu */
+        #game-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px; }
+        .input-group { display: flex; flex-direction: column; }
+        .input-group label { margin-bottom: 5px; font-weight: 600; color: #555; font-size: 0.9em; }
+        .input-group input { padding: 10px; border: 2px solid #ddd; border-radius: 5px; font-size: 16px; transition: border-color 0.3s; }
+        .input-group input:focus { border-color: var(--primary); outline: none; }
+        .input-group input:disabled { background-color: #eee; color: #777; cursor: not-allowed; }
+
+        /* Contrôles */
+        .controls { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; }
+        button { padding: 12px 30px; font-size: 16px; border: none; border-radius: 50px; color: white; font-weight: bold; cursor: pointer; transition: transform 0.1s, opacity 0.2s;box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        button:active { transform: scale(0.98); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-start { background-color: var(--success); }
+        .btn-stop { background-color: var(--danger); }
+        .btn-join { background-color: var(--primary); }
+
+        /* Résultats */
+        #results-area { margin-top: 30px; border-top: 2px solid #eee; padding-top: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9em; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f8f9fa; }
+        td.player-name { font-weight: bold; color: var(--primary); }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <h1>Petit Bac Online</h1>
+
+    <div id="app-container">
+        <div id="login-screen">
+            <h2>Rejoindre une partie</h2>
+            <p>Entrez le même code pour jouer ensemble.</p>
+            <input type="text" id="room-code" placeholder="Code de la salle (ex: SALLE1)" uppercase>
+            <br>
+            <input type="text" id="username" placeholder="Votre Pseudo">
+            <br><br>
+            <button class="btn-join" onclick="joinRoom()">REJOINDRE</button>
+        </div>
+
+        <div id="game-screen" class="hidden">
+            <div class="status-bar">
+                <div>Salle: <span id="room-display"></span> | Joueur: <span id="player-display"></span></div>
+                <div id="players-list">En attente...</div>
+            </div>
+
+            <div class="status-bar main-status">
+                <div>Lettre : <span id="lettre-display" class="letter-box">?</span></div>
+                <div>Temps : <span id="timer-display" class="timer-box">60</span>s</div>
+            </div>
+
+            <div id="status-message" class="game-status-msg">En attente du lancement de la partie...</div>
+
+            <div id="game-grid">
+                </div>
+
+            <div class="controls">
+                <button id="btn-start" class="btn-start" onclick="startGameCmd()">LANCER NOUVELLE MANCHE</button>
+                <button id="btn-stop" class="btn-stop" onclick="stopGameCmd()" disabled>STOP ! (J'ai fini)</button>
+            </div>
+
+            <div id="results-area" class="hidden">
+                <h2>Résultats de la manche</h2>
+                <p id="stopper-info"></p>
+                <div style="overflow-x: auto;">
+                    <table id="results-table">
+                        </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================================================================
+        // CONFIGURATION FIREBASE OBLIGATOIRE !!!
+        // Remplace tout le bloc ci-dessous par celui donné par Firebase
+        // ==================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyBqy4pRUhq4XLv5rUxlcsOLY_TgzuIvQWk",
+			  authDomain: "petit-bac-fc0f6.firebaseapp.com",
+			  databaseURL: "https://petit-bac-fc0f6-default-rtdb.europe-west1.firebasedatabase.app",
+			  projectId: "petit-bac-fc0f6",
+			  storageBucket: "petit-bac-fc0f6.firebasestorage.app",
+			  messagingSenderId: "838878170684",
+			  appId: "1:838878170684:web:d7670d939a3ac75870fd39",
+			  measurementId: "G-WW8GENYGZX"
+        };
+        
+        // Vérification basique que la config est là
+        if (Object.keys(firebaseConfig).length === 0) {
+             alert("ERREUR CRITIQUE : Tu n'as pas collé la configuration Firebase dans le code HTML (voir les instructions). Le jeu ne peut pas fonctionner.");
+        }
+
+        // Initialisation Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        // ==============================
+        // VARIABLES GLOBALES
+        // ==============================
+        const categories = ["Prénom", "Pays", "Ville", "Marque", "Objet", "Animal", "Acteurs/Célébrités", "Fruit/Légume", "Métier", "Personnages Fictifs"];
+        let currentRoomId = null;
+        let myUserId = null;
+        let myUsername = null;
+        let localTimerInt = null;
+        let isHost = false; // Pour éviter que tout le monde lance le timer
+
+        const sounds = {
+            start: new Audio('https://assets.mixkit.co/sfx/preview/mixkit-game-level-music-689.mp3'), // Son court
+            stop: new Audio('https://assets.mixkit.co/sfx/preview/mixkit-arcade-retro-game-over-213.mp3')
+        };
+        sounds.start.volume = 0.3;
+        sounds.stop.volume = 0.4;
+
+        // ==============================
+        // FONCTIONS D'INITIALISATION
+        // ==============================
+        function generateGrid() {
+            const grid = document.getElementById('game-grid');
+            categories.forEach((cat, idx) => {
+                grid.innerHTML += `
+                    <div class="input-group">
+                        <label>${cat}</label>
+                        <input type="text" id="input-${idx}" class="game-input" disabled autocomplete="off">
+                    </div>`;
+            });
+            // Générer l'en-tête du tableau de résultats
+            const tableHead = document.getElementById('results-table');
+            let headerHTML = '<thead><tr><th>Joueur</th>';
+            categories.forEach(cat => headerHTML += `<th>${cat}</th>`);
+            headerHTML += '</tr></thead><tbody id="results-body"></tbody>';
+            tableHead.innerHTML = headerHTML;
+        }
+
+        function joinRoom() {
+            const roomCodeInput = document.getElementById('room-code').value.toUpperCase().trim();
+            const usernameInput = document.getElementById('username').value.trim();
+
+            if (!roomCodeInput || !usernameInput) { alert("Il faut un code de salle et un pseudo !"); return; }
+
+            currentRoomId = "room_" + roomCodeInput;
+            myUsername = usernameInput;
+            // Générer un ID utilisateur unique simple
+            myUserId = 'user_' + Math.random().toString(36).substr(2, 9);
+
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            document.getElementById('room-display').innerText = roomCodeInput;
+            document.getElementById('player-display').innerText = myUsername;
+
+            generateGrid();
+            setupFirebaseListeners();
+
+            // S'ajouter à la liste des joueurs
+            db.ref(currentRoomId + '/players/' + myUserId).set({
+                name: myUsername,
+                score: 0
+            });
+
+            // Définir l'état initial si la salle est nouvelle
+            db.ref(currentRoomId + '/gameState').transaction(currentState => {
+                 if (!currentState) return "waiting";
+                 return currentState;
+            });
+        }
+
+        // ==============================
+        // LOGIQUE FIREBASE (LE CŒUR DU SYSTÈME)
+        // ==============================
+        function setupFirebaseListeners() {
+            const roomRef = db.ref(currentRoomId);
+
+            // 1. Écouter les joueurs connectés
+            roomRef.child('players').on('value', snapshot => {
+                const players = snapshot.val();
+                if (!players) return;
+                const names = Object.values(players).map(p => p.name).join(', ');
+                document.getElementById('players-list').innerText = "Joueurs : " + names;
+                
+                // Simple façon de déterminer un "hôte" pour gérer le temps serveur : le premier dans la liste
+                isHost = (Object.keys(players)[0] === myUserId);
+                renderResultsTable(players);
+            });
+
+            // 2. Écouter l'état du jeu (waiting, playing, finished)
+            roomRef.child('gameState').on('value', snapshot => {
+                const state = snapshot.val();
+                handleGameStateChange(state);
+            });
+
+             // 3. Écouter la lettre
+             roomRef.child('currentLetter').on('value', snap => {
+                 document.getElementById('lettre-display').innerText = snap.val() || "?";
+             });
+
+             // 4. Écouter l'info du stoppeur
+             roomRef.child('stopperName').on('value', snap => {
+                 const name = snap.val();
+                 if(name) document.getElementById('stopper-info').innerText = `STOP demandé par : ${name} !`;
+             });
+        }
+
+        function handleGameStateChange(state) {
+            clearInterval(localTimerInt); // Toujours nettoyer le timer précédent
+            const inputs = document.querySelectorAll('.game-input');
+            const statusMsg = document.getElementById('status-message');
+            const btnStop = document.getElementById('btn-stop');
+            const btnStart = document.getElementById('btn-start');
+            const resultsArea = document.getElementById('results-area');
+
+            switch(state) {
+                case 'playing':
+                    statusMsg.innerText = "LA PARTIE EST EN COURS ! VITE !";
+                    resultsArea.classList.add('hidden');
+                    btnStop.disabled = false;
+                    btnStart.disabled = true;
+                    inputs.forEach(i => { i.disabled = false; i.value = ''; });
+                    inputs[0].focus();
+                    // Lancer le timer synchronisé
+                    syncTimer();
+                    sounds.start.play().catch(()=>{}); // Essayer de jouer le son
+                    break;
+
+                case 'finished':
+                    statusMsg.innerText = "MANCHE TERMINÉE ! On lève les mains !";
+                    resultsArea.classList.remove('hidden');
+                    btnStop.disabled = true;
+                    btnStart.disabled = false;
+                    inputs.forEach(i => i.disabled = true);
+                    submitMyAnswers(); // Envoyer mes réponses immédiatement
+                    sounds.stop.play().catch(()=>{});
+                    break;
+
+                case 'waiting':
+                default:
+                    statusMsg.innerText = "En attente du lancement d'une nouvelle manche...";
+                    resultsArea.classList.add('hidden');
+                    btnStop.disabled = true;
+                    btnStart.disabled = false;
+                    btnStart.innerText = "LANCER LA MANCHE";
+                    inputs.forEach(i => { i.disabled = true; i.value = '';});
+                    document.getElementById('timer-display').innerText = "60";
+                    document.getElementById('lettre-display').innerText = "?";
+                    break;
+            }
+        }
+
+        // ==============================
+        // COMMANDES JOUEUR (Actions qui modifient la DB)
+        // ==============================
+        function startGameCmd() {
+            // Réinitialiser les réponses précédentes
+            db.ref(currentRoomId + '/players').once('value', snap => {
+                snap.forEach(playerSnap => {
+                    playerSnap.ref.child('answers').remove();
+                });
+            });
+
+            const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            const lettre = alphabet[Math.floor(Math.random() * alphabet.length)];
+            
+            // Mise à jour atomique de la DB pour lancer le jeu
+            db.ref(currentRoomId).update({
+                gameState: 'playing',
+                currentLetter: lettre,
+                startTime: firebase.database.ServerValue.TIMESTAMP, // Temps serveur crucial
+                stopperName: null
+            });
+        }
+
+        function stopGameCmd() {
+            // Je suis celui qui a cliqué sur STOP
+            db.ref(currentRoomId).update({
+                gameState: 'finished',
+                stopperName: myUsername
+            });
+        }
+
+        function submitMyAnswers() {
+            const myAnswers = [];
+            const inputs = document.querySelectorAll('.game-input');
+            inputs.forEach(input => {
+                 // Nettoyer un peu l'entrée
+                 myAnswers.push(input.value.trim() || "");
+            });
+            // Envoyer à Firebase
+            db.ref(currentRoomId + '/players/' + myUserId + '/answers').set(myAnswers);
+        }
+
+
+        // ==============================
+        // UTILITAIRES (Timer et Tableau)
+        // ==============================
+        function syncTimer() {
+            db.ref(currentRoomId + '/startTime').once('value', snap => {
+                const startTimestamp = snap.val();
+                if (!startTimestamp) return;
+
+                localTimerInt = setInterval(() => {
+                    // Calculer le temps écoulé par rapport au temps serveur (pour éviter les décalages d'horloge locale)
+                    const now = Date.now(); 
+                    // Petit hack: on utilise Date.now() local faute de mieux en simple JS, 
+                    // si l'horloge du PC est très fausse ça peut décaler un peu, mais c'est acceptable ici.
+                    const elapsedSec = Math.floor((now - startTimestamp) / 1000);
+                    const remaining = 60 - elapsedSec;
+
+                    if (remaining <= 0) {
+                        document.getElementById('timer-display').innerText = "0";
+                        clearInterval(localTimerInt);
+                        // Si je suis l'hôte, je signale officiellement la fin du temps
+                        if (isHost && document.getElementById('btn-stop').disabled === false) {
+                             db.ref(currentRoomId).update({ gameState: 'finished', stopperName: "Le Temps Écoulé" });
+                        }
+                    } else {
+                        document.getElementById('timer-display').innerText = remaining;
+                    }
+                }, 1000);
+            });
+        }
+
+        function renderResultsTable(playersData) {
+            const tbody = document.getElementById('results-body');
+            tbody.innerHTML = '';
+
+            Object.values(playersData).forEach(player => {
+                let rowHtml = `<tr><td class="player-name">${player.name}</td>`;
+                const answers = player.answers || []; // S'assurer qu'on a un tableau même vide
+                
+                // On boucle sur le nombre de catégories pour remplir les colonnes
+                for (let i = 0; i < categories.length; i++) {
+                    const rep = answers[i] ? answers[i] : "";
+                    // Style simple : vide = rouge clair, rempli = vert clair
+                    const bgStyle = rep === "" ? "#ffebee" : "#e8f5e9"; 
+                    rowHtml += `<td style="background-color:${bgStyle}">${rep}</td>`;
+                }
+                rowHtml += '</tr>';
+                tbody.innerHTML += rowHtml;
+            });
+        }
+
+        // Petit nettoyage si on quitte la page
+        window.addEventListener('beforeunload', function (e) {
+            if (myUserId && currentRoomId) {
+                // Se retirer de la liste des joueurs
+                db.ref(currentRoomId + '/players/' + myUserId).remove();
+            }
+        });
+
+    </script>
+</body>
+</html>
